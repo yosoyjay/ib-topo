@@ -1,0 +1,13 @@
+[project]
+name = "ibtopo"
+version = "0.0.1"
+authors = [
+    { name="Jesse Loepz", email="lopezjesse@microsoft.com" },
+]
+description = "A tool to generate topology information for InfiniBand networks"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
