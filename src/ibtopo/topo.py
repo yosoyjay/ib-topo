@@ -60,8 +60,8 @@ class IBTopology:
     hosts: list = []
     # Output topology file from sharp_cmd
     topo_file: Path
-    # List of nodes extracted from topology file
-    nodes: list = []
+    # List of guids attached to a single switch extracted from topology file (filtered_node_entries.txt)
+    device_guids_per_switch: list = []
     # Map hosts to torsets
     host_ip_to_torset: dict = {}
     # Entire graph of topology
@@ -79,17 +79,17 @@ class IBTopology:
 
         self.hosts = self._read_hosts_file()
 
-    def _read_hosts_file(self):
+    def _read_hosts_file(self) -> list:
         with open(self.hosts_file, 'r') as f:
             hosts = [host.strip() for host in f.readlines()]
 
         return hosts
 
-    def _fetch_guid(self, host, username, private_key):
-        cmd = "ibstat | grep 'Port GUID' | cut -d ':' -f 2"
+    def _fetch_guids(self, host, username, private_key, ibdevice_pattern='mlx5_ib') -> dict:
+        cmd = "ibstatus | grep {ibdevice_pattern} | cut -d ' ' -f 3 | xargs -I% ibstat '%' | grep 'Port GUID' | cut -d ':' -f 2"
         return run_remote_cmd(host, username, cmd)
 
-    def fetch_guids(self, username, private_key):
+    def fetch_guids(self, username, private_key) -> dict:
         guids = {}
         for host in self.hosts:
             result = self._fetch_guid(host, username, private_key)
@@ -102,28 +102,27 @@ class IBTopology:
                 logging.error(f"Error fetching GUID for host {host}")
         return guids
 
-    def write_guids_to_file(self, guids_file):
+    def write_guids_to_file(self, guids_file) -> None:
         with open(guids_file, 'w') as f:
             for guid in self.guid_to_host_ip.keys():
                 f.write(f"{guid}\n")
 
-    def create_topo_file(self):
+    def create_topo_file(self) -> None:
         cmd = f"SHARP_SMX_UCX_INTERFACE={self.sharp_smx_ucx_interface}; {self.sharp_cmd_path} topology --ib-dev {self.sharp_smx_ucx_interface} --guids_file {self.guids_file} --topology_file {self.topo_file}"
         run_command(cmd)
         logging.info(f"Topology file generated at {self.topo_file}")
 
-    def _populate_nodes(self):
-        nodes = []
+    def _populate_device_guids_per_switch(self) -> list:
+        guids_per_switch = []
         with open(self.topo_file, 'r') as f:
             for line in f:
                 if 'Nodes=' not in line:
                     continue
                 # 'SwitchName=ibsw2 Nodes=0x155dfffd341acb,0x155dfffd341b0b'
-                # Want GUIDs for nodes
-                nodes.append(line.strip().split(' ')[1].split('=')[1])
-        return nodes
+                guids_per_switch.append(line.strip().split(' ')[1].split('=')[1])
+        return guids_per_switch
 
-    def _populate_graph(self):
+    def _populate_graph(self) -> nx.Graph:
         graph = nx.Graph()
         with open(self.topo_file, 'r') as f:
             for line in f.readlines():
@@ -144,20 +143,21 @@ class IBTopology:
                             graph.add_edge(switch_name, node, type='switch-to-node')
         return graph
 
-    def identify_torsets(self):
+    def identify_torsets(self) -> dict:
         # torset_node_map equivalent
         host_ip_to_torset = {}
-        for ix, node in enumerate(self.nodes):
-            node_guids = node.strip().split(",")
-#            torset_index = len(host_ip_to_torset)
-            for guid in node_guids:
+        for device_guids_one_switch in self.device_guids_per_switch:
+            device_guids = device_guids_one_switch.strip().split(",")
+            # increment torset index for each new torset
+            torset_index = len(set(host_ip_to_torset.values()))
+            for guid in device_guids:
                 host_ip = self.guid_to_host_ip[guid]
                 if host_ip in host_ip_to_torset:
                     continue
-                host_ip_to_torset[host_ip] = f"torset-{ix:02}"
+                host_ip_to_torset[host_ip] = f"torset-{torset_index:02}"
         return host_ip_to_torset
 
-    def group_hosts_by_torset(self):
+    def group_hosts_by_torset(self) -> dict:
         torsets = {}
         for host_ip, torset in self.host_ip_to_torset.items():
             if torset not in torsets:
@@ -166,13 +166,14 @@ class IBTopology:
                 torsets[torset].append(host_ip)
         return torsets
 
-    def write_hosts_by_torset(self):
+    def write_hosts_by_torset(self) -> None:
         for torset, hosts in self.torsets.items():
-            with open(f"{torset}_hosts.txt", 'w') as f:
+            output_file = self.output_dir / f"{torset}_hosts.txt"
+            with open(output_file, 'w') as f:
                 for host in hosts:
                     f.write(f"{host}\n")
 
-    def draw_topology(self):
+    def draw_topology(self) -> None:
         pos = nx.spring_layout(self.graph, k=0.5, iterations=100)
         nx.draw(self.graph, pos, with_labels=True)
         plt.savefig(self.output_dir / 'topology.png')
@@ -193,7 +194,7 @@ def main(topo_config: TopologyConfig):
     logging.info(f"GUIDs written to {ib_topology.guids_file}")
     ib_topology.create_topo_file()
     logging.info(f"Topology file generated at {ib_topology.topo_file}")
-    ib_topology.nodes = ib_topology._populate_nodes()
+    ib_topology.device_guids_per_switch = ib_topology._populate_device_guids_per_switch()
     ib_topology.graph = ib_topology._populate_graph()
     logging.info("Populated graph from topology file")
     ib_topology.host_ip_to_torset = ib_topology.identify_torsets()
