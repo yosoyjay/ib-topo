@@ -213,7 +213,7 @@ def main(topo_config: TopologyConfig):
     logging.info("{len(ib_topology.torsets)} torsets identified")
 
 
-if __name__ == '__main__':
+def parse_args():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('hosts', type=str, help='Path to host file')
@@ -223,7 +223,11 @@ if __name__ == '__main__':
     parser.add_argument('output_dir', type=str, help='Output directory for generated files')
     parser.add_argument('--sharp_smx_ucx_interface', type=str, default='mlx5_ib0:1', help='Sharp SMX UCX Interface (default: mlx5_ib0:1)')
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def cli():
+    args = parse_args()
     torset_config = TopologyConfig(
         hosts_file=Path(args.hosts),
         output_dir=Path(args.output_dir),
@@ -234,3 +238,7 @@ if __name__ == '__main__':
     )
 
     main(torset_config)
+
+
+if __name__ == '__main__':
+    cli()
