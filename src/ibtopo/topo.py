@@ -44,6 +44,9 @@ class TopologyConfig:
     output_dir: Path
     sharp_cmd_path: Path
     sharp_smx_ucx_interface: str
+    # pattern to grep for when fetching GUIDs from ibstat.
+    # - See _fetch_guids method in IBTopology
+    ibdevice_pattern: str
     username: str
     pkey_path: Path
 
@@ -69,10 +72,12 @@ class IBTopology:
     # Map torsets to hosts
     torsets = {}
 
-    def __init__(self, output_dir: Path, hosts_file: Path, sharp_cmd_path: Path, sharp_smx_ucx_interface: str='mlx5_ib0:1'):
+    def __init__(self, output_dir: Path, hosts_file: Path, sharp_cmd_path: Path, sharp_smx_ucx_interface: str='mlx5_ib0:1', ibdevice_pattern='mlx5_ib'):
         self.hosts_file = hosts_file
         self.sharp_cmd_path = sharp_cmd_path
         self.sharp_smx_ucx_interface = sharp_smx_ucx_interface
+        # InfiniBand device pattern to match
+        self.ibdevice_pattern = ibdevice_pattern
         self.output_dir = output_dir
         self.guids_file = output_dir / 'guids.txt'
         self.topo_file = output_dir / 'topology.txt'
@@ -85,7 +90,7 @@ class IBTopology:
 
         return hosts
 
-    def _fetch_guids(self, host, username, private_key, ibdevice_pattern='mlx5_ib') -> dict:
+    def _fetch_guids(self, host, username, private_key, ibdevice_pattern) -> dict:
         cmd = f"ibstatus | grep {ibdevice_pattern} | cut -d ' ' -f 3 | xargs -I% ibstat '%' | grep 'Port GUID' | cut -d ':' -f 2"
         return run_remote_cmd(host, username, cmd)
 
@@ -185,15 +190,16 @@ def main(topo_config: TopologyConfig):
     hosts_path = topo_config.hosts_file
     sharp_if = topo_config.sharp_smx_ucx_interface
     sharp_cmd = topo_config.sharp_cmd_path
+    ibdevice_pattern = topo_config.infiniband_pattern
     username = topo_config.username
     pkey_path = topo_config.pkey_path
     output_dir = topo_config.output_dir
 
     output_dir.mkdir(exist_ok=True)
 
-    ib_topology = IBTopology(output_dir, hosts_path, sharp_cmd, sharp_if)
+    ib_topology = IBTopology(output_dir, hosts_path, sharp_cmd, sharp_if, ibdevice_pattern)
     ib_topology.guid_to_host_ip = ib_topology.fetch_guids(username, pkey_path)
-    logging.info("Finished collecting Infiniband device GUIDs from hosts")
+    logging.info("Finished collecting InfiniBand device GUIDs from hosts")
     ib_topology.write_guids_to_file(ib_topology.guids_file)
     logging.info(f"GUIDs written to {ib_topology.guids_file}")
     ib_topology.create_topo_file()
@@ -222,6 +228,7 @@ def parse_args():
     parser.add_argument('sharp_cmd_path', type=str, help='Path to sharp_cmd')
     parser.add_argument('output_dir', type=str, help='Output directory for generated files')
     parser.add_argument('--sharp_smx_ucx_interface', type=str, default='mlx5_ib0:1', help='Sharp SMX UCX Interface (default: mlx5_ib0:1)')
+    parser.add_argument('--ibdevice_pattern', type=str, default='mlx5_ib', help='InfiniBand device pattern (default: mlx5_ib)')
 
     return parser.parse_args()
 
@@ -233,6 +240,7 @@ def cli():
         output_dir=Path(args.output_dir),
         sharp_cmd_path=Path(args.sharp_cmd_path),
         sharp_smx_ucx_interface=args.sharp_smx_ucx_interface,
+        ibdevice_pattern=args.infiniband_pattern,
         username=args.username,
         pkey_path=Path(args.pkey_path)
     )
