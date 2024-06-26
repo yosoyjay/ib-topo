@@ -205,12 +205,12 @@ def main(topo_config: TopologyConfig):
     logging.info("Identified torsets for hosts")
     ib_topology.torsets = ib_topology.group_hosts_by_torset()
     ib_topology.write_hosts_by_torset()
-    logging.info("Hosts grouped by torset and written to files in {ib_topology.output_dir}")
+    logging.info(f"Hosts grouped by torset and written to files in {ib_topology.output_dir}")
     ib_topology.draw_topology()
-    logging.info("Topology graph saved to {ib_topology.output_dir / 'topology.png'}")
+    logging.info(f"Topology graph saved to {ib_topology.output_dir / 'topology.png'}")
 
-    logging.info("{len(ib_topology.host_ip_to_torset)} nodes identified")
-    logging.info("{len(ib_topology.torsets)} torsets identified")
+    logging.info(f"{len(ib_topology.host_ip_to_torset)} nodes identified")
+    logging.info(f"{len(ib_topology.torsets)} torsets identified")
 
 
 def parse_args():
