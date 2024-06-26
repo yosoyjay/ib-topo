@@ -86,18 +86,20 @@ class IBTopology:
         return hosts
 
     def _fetch_guids(self, host, username, private_key, ibdevice_pattern='mlx5_ib') -> dict:
-        cmd = "ibstatus | grep {ibdevice_pattern} | cut -d ' ' -f 3 | xargs -I% ibstat '%' | grep 'Port GUID' | cut -d ':' -f 2"
+        cmd = f"ibstatus | grep {ibdevice_pattern} | cut -d ' ' -f 3 | xargs -I% ibstat '%' | grep 'Port GUID' | cut -d ':' -f 2"
         return run_remote_cmd(host, username, cmd)
 
     def fetch_guids(self, username, private_key) -> dict:
         guids = {}
         for host in self.hosts:
-            result = self._fetch_guid(host, username, private_key)
+            result = self._fetch_guids(host, username, private_key)
             if result['return_code'] == 0:
                 # Querying GUIDs from ibstat will have pattern 0x0099999999999999, but Sharp will return 0x99999999999999
                 # - So we need to remove the leading 00 after 0x
-                guid = result['stdout'].replace('0x00', '0x')
-                guids[guid] = host
+                # - Split the 8 GUIDs and use as keys with value being the host
+                node_guids = result['stdout'].replace('0x00', '0x').split()
+                for node_guid in node_guids:
+                    guids[node_guid] = host
             else:
                 logging.error(f"Error fetching GUID for host {host}")
         return guids
@@ -108,7 +110,7 @@ class IBTopology:
                 f.write(f"{guid}\n")
 
     def create_topo_file(self) -> None:
-        cmd = f"SHARP_SMX_UCX_INTERFACE={self.sharp_smx_ucx_interface}; {self.sharp_cmd_path} topology --ib-dev {self.sharp_smx_ucx_interface} --guids_file {self.guids_file} --topology_file {self.topo_file}"
+        cmd = f"SHARP_SMX_UCX_INTERFACE={self.sharp_smx_ucx_interface} {self.sharp_cmd_path} topology --ib-dev {self.sharp_smx_ucx_interface} --guids_file {self.guids_file} --topology_file {self.topo_file}"
         run_command(cmd)
         logging.info(f"Topology file generated at {self.topo_file}")
 
@@ -187,7 +189,9 @@ def main(topo_config: TopologyConfig):
     pkey_path = topo_config.pkey_path
     output_dir = topo_config.output_dir
 
-    ib_topology = IBTopology(output_dir, hosts_path, sharp_if, sharp_cmd)
+    output_dir.mkdir(exist_ok=True)
+
+    ib_topology = IBTopology(output_dir, hosts_path, sharp_cmd, sharp_if)
     ib_topology.guid_to_host_ip = ib_topology.fetch_guids(username, pkey_path)
     logging.info("Finished collecting Infiniband device GUIDs from hosts")
     ib_topology.write_guids_to_file(ib_topology.guids_file)
@@ -212,12 +216,12 @@ def main(topo_config: TopologyConfig):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--hosts', type=str, help='Path to host file')
-    parser.add_argument('--username', type=str, help='Username to connect to hosts')
-    parser.add_argument('--pkey_path', type=str, help='Path to user private key')
-    parser.add_argument('--sharp_cmd_path', type=str, help='Path to sharp_cmd')
-    parser.add_argument('--output_dir', type=str, help='Output directory for generated files')
-    parser.add_argument('sharp_smx_ucx_interface', type=str, default='mlx5_ib0:1', help='Sharp SMX UCX Interface (default: mlx5_ib0:1)')
+    parser.add_argument('hosts', type=str, help='Path to host file')
+    parser.add_argument('username', type=str, help='Username to connect to hosts')
+    parser.add_argument('pkey_path', type=str, help='Path to user private key')
+    parser.add_argument('sharp_cmd_path', type=str, help='Path to sharp_cmd')
+    parser.add_argument('output_dir', type=str, help='Output directory for generated files')
+    parser.add_argument('--sharp_smx_ucx_interface', type=str, default='mlx5_ib0:1', help='Sharp SMX UCX Interface (default: mlx5_ib0:1)')
 
     args = parser.parse_args()
     torset_config = TopologyConfig(
